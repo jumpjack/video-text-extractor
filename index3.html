@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Capture and OCR with Ocrad.js</title>
+    <style>
+        #video-container, #canvas-container {
+            position: relative;
+            display: inline-block;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .area-info {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h2>Upload a Video and Select Areas for Text Extraction</h2>
+
+    <input type="file" id="videoInput" accept="video/mp4" />
+    <div id="video-container">
+        <video id="video" controls></video>
+        <canvas id="canvas"></canvas>
+    </div>
+    <div id="areas-container"></div>
+
+    <!-- Include the ocrad.js library -->
+    <script src="https://cdn.jsdelivr.net/gh/antimatter15/ocrad.js/ocrad.js"></script>
+    <script>
+        const videoInput = document.getElementById('videoInput');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const areasContainer = document.getElementById('areas-container');
+        let captureAreas = [];
+        let isDrawing = false;
+        let currentArea = null;
+
+        videoInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            const url = URL.createObjectURL(file);
+            video.src = url;
+            video.load();
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const startX = e.clientX - rect.left;
+            const startY = e.clientY - rect.top;
+            currentArea = { startX, startY, width: 0, height: 0 };
+            isDrawing = true;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+            currentArea.width = endX - currentArea.startX;
+            currentArea.height = endY - currentArea.startY;
+            drawCanvas();
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            if (isDrawing && currentArea) {
+                captureAreas.push(currentArea);
+                addAreaInfo(currentArea);
+            }
+            isDrawing = false;
+        });
+
+        function drawCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            captureAreas.forEach(area => {
+                ctx.strokeRect(area.startX, area.startY, area.width, area.height);
+            });
+            if (currentArea) {
+                ctx.strokeRect(currentArea.startX, currentArea.startY, currentArea.width, currentArea.height);
+            }
+        }
+
+        function addAreaInfo(area) {
+            const areaDiv = document.createElement('div');
+            areaDiv.classList.add('area-info');
+            areaDiv.innerHTML = `
+                Area - X: <input type="number" value="${area.startX}" onchange="updateArea(this, 'startX', ${captureAreas.indexOf(area)})" /> 
+                Y: <input type="number" value="${area.startY}" onchange="updateArea(this, 'startY', ${captureAreas.indexOf(area)})" /> 
+                Width: <input type="number" value="${area.width}" onchange="updateArea(this, 'width', ${captureAreas.indexOf(area)})" /> 
+                Height: <input type="number" value="${area.height}" onchange="updateArea(this, 'height', ${captureAreas.indexOf(area)})" />
+            `;
+            areasContainer.appendChild(areaDiv);
+        }
+
+        function updateArea(input, property, index) {
+            captureAreas[index][property] = parseInt(input.value);
+            drawCanvas();
+        }
+
+        video.addEventListener('play', () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            setInterval(extractTextFromAreas, 1000);
+        });
+
+        async function extractTextFromAreas() {
+            captureAreas.forEach((area) => {
+                ctx.drawImage(video, area.startX, area.startY, area.width, area.height, 0, 0, area.width, area.height);
+                const imageData = ctx.getImageData(0, 0, area.width, area.height);
+                const extractedText = Ocrad(imageData);
+                console.log(`Extracted Text from Area (${area.startX}, ${area.startY}):`, extractedText);
+            });
+        }
+    </script>
+</body>
+</html>
