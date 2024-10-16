@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Scanner con caricamento video</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        #videoContainer {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        #scanIndicator {
+            position: absolute;
+            border: 2px solid red;
+            z-index: 10;
+        }
+        #scannedText {
+            width: 100%;
+            max-width: 600px;
+            word-wrap: break-word;
+        }
+        #controls {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>OCR Scanner con caricamento video</h1>
+    <div id="controls">
+        <input type="file" id="videoFile" accept="video/*">
+        <button id="startScan">Inizia scansione</button>
+        <button id="stopScan" disabled>Ferma scansione</button>
+    </div>
+    <div id="videoContainer">
+        <video id="video" controls></video>
+        <div id="scanIndicator"></div>
+    </div>
+    <h2>Testo scansionato:</h2>
+    <p id="scannedText"></p>
+
+    <script>
+        const video = document.getElementById('video');
+        const scanIndicator = document.getElementById('scanIndicator');
+        const scannedTextElement = document.getElementById('scannedText');
+        const videoFileInput = document.getElementById('videoFile');
+        const startScanButton = document.getElementById('startScan');
+        const stopScanButton = document.getElementById('stopScan');
+
+        const worker = Tesseract.createWorker();
+
+        // Configurazione video
+        const vidWidth = Math.min(window.innerWidth - 40, 640);
+        const vidHeight = (vidWidth * 9) / 16;
+
+        // Configurazione indicatore
+        const marginX = 40;
+        const indWidth = vidWidth - marginX;
+        const indHeight = 80;
+
+        video.width = vidWidth;
+        video.height = vidHeight;
+        scanIndicator.style.width = `${indWidth}px`;
+        scanIndicator.style.height = `${indHeight}px`;
+        scanIndicator.style.top = `${(vidHeight - indHeight) / 2}px`;
+        scanIndicator.style.left = `${marginX / 2}px`;
+
+        let isScanning = false;
+
+        async function initOCR() {
+            await worker.load();
+            await worker.loadLanguage('eng');
+            await worker.initialize('eng');
+        }
+
+        videoFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const videoURL = URL.createObjectURL(file);
+                video.src = videoURL;
+            }
+        });
+
+        startScanButton.addEventListener('click', () => {
+            if (video.src) {
+                isScanning = true;
+                video.play();
+                startScanButton.disabled = true;
+                stopScanButton.disabled = false;
+                requestAnimationFrame(tick);
+            } else {
+                alert('Per favore, seleziona un video prima di iniziare la scansione.');
+            }
+        });
+
+        stopScanButton.addEventListener('click', () => {
+            isScanning = false;
+            video.pause();
+            startScanButton.disabled = false;
+            stopScanButton.disabled = true;
+        });
+
+        async function tick() {
+            if (isScanning && !video.paused && !video.ended) {
+                const canvas = document.createElement('canvas');
+                canvas.width = indWidth;
+                canvas.height = indHeight;
+                const ctx = canvas.getContext('2d');
+
+                ctx.drawImage(
+                    video,
+                    (vidWidth - indWidth) / 2, (vidHeight - indHeight) / 2, indWidth, indHeight,
+                    0, 0, indWidth, indHeight
+                );
+
+                const { data: { text } } = await worker.recognize(canvas);
+                const scannedText = text.replace(/[^a-zA-Z0-9]/g, '');
+
+                if (scannedText && scannedText !== scannedTextElement.textContent) {
+                    scannedTextElement.textContent = scannedText;
+                }
+
+                requestAnimationFrame(tick);
+            }
+        }
+
+        initOCR();
+    </script>
+</body>
+</html>
