@@ -10,5 +10,6 @@ I asked Claude.AI to create a page which allows extracting data from a video eve
 Trying to get a working result....
 
 - [Test 01](https://jumpjack.github.io/video-text-extractor/index.html)
+- [Test 02](https://jumpjack.github.io/video-text-extractor/index2.html)
 - 
 
