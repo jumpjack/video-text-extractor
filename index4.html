@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Capture and OCR with Ocrad.js</title>
+    <style>
+        #video-container, #canvas-container {
+            position: relative;
+            display: inline-block;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .area-info {
+            margin: 10px 0;
+        }
+        .controls {
+            margin: 10px 0;
+        }
+        #chartContainer {
+            width: 80%;
+            margin: 20px auto;
+        }
+        #dataSelectionContainer {
+            margin: 10px 0;
+        }
+
+    </style>
+</head>
+<body>
+    <h2>Upload a Video and Select Areas for Text Extraction</h2>
+
+    <input type="file" id="videoInput" accept="video/mp4" /><br>
+	<a href="https://www.youtube.com/watch?v=eXsT2HT171o">IFT5 Spacex full video</a><br>
+	<a href="https://appsgolem.com/en/cut-youtube-video">Youtube slicer/dwonloader</a><br>
+    <div id="video-container">
+        <video id="video" controls></video>
+        <canvas id="canvas"></canvas>
+    </div>
+    <div class="controls">
+        <button id="restartVideo">Play</button>
+        <button id="stopVideo">Pause</button><br>
+        <button id="restartScan">Start Scan</button>
+       <button id="stopScan">Stop Scan</button><br>
+       <button id="btnLoadAreas">Load areas</button><br>
+        <button id="plotGraphBtn">Plot Graph</button>
+    </div>
+   <div id="dataSelectionContainer"></div>
+    <div id="chartContainer">
+        <canvas id="dataChart"></canvas>
+    </div>
+  <!--  <h3>Preview of the Area Passed to OCR</h3>
+    <canvas id="previewCanvas"></canvas>-->
+    <div id="areas-container"></div>
+
+    <h3>Risultati della Scansione</h3>
+    <table id="resultsTable" border="1">
+        <thead>
+             <!--<tr>
+               <th>m</th>
+                <th>s</th>
+                <th>a</th>
+            </tr>-->
+        </thead>
+        <tbody id="resultsBody">
+        </tbody>
+    </table>
+
+    <h3>Contenuto di textArray</h3>
+    <textarea id="textArrayContent" rows="10" cols="50" readonly></textarea>
+
+
+    <!-- Include the ocrad.js library -->
+    <script src="ocrad.js"></script>
+    <script src="areas.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.0"></script>
+    <script>
+		areasCount = 0;
+		areasData = [];
+		const INTERVALMS = 1000/25;
+        const videoInput = document.getElementById('videoInput');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        //const previewCanvas = document.getElementById('previewCanvas');
+        //const previewCtx = previewCanvas.getContext('2d');
+        const areasContainer = document.getElementById('areas-container');
+        const resultsBody = document.getElementById('resultsBody');
+        const textArrayContent = document.getElementById('textArrayContent');
+        const stopScanButton = document.getElementById('stopScan');
+        const restartScanButton = document.getElementById('restartScan');
+        const stopVideoButton = document.getElementById('stopVideo');
+        const restartVideoButton = document.getElementById('restartVideo');
+        const btnLoadAreas = document.getElementById('btnLoadAreas');
+		myTable = document.getElementById('resultsTable');
+		myTableHeader = myTable.children[0];
+console.log(myTableHeader)
+        //let captureAreas = []; // Loaded from file
+        let isDrawing = false;
+        let currentArea = null;
+        let scanInterval = null; // Interval for scanning OCR
+        let textArray = [];
+		let isScanning = false;
+
+
+        const plotGraphBtn = document.getElementById('plotGraphBtn');
+        const dataSelectionContainer = document.getElementById('dataSelectionContainer');
+        const chartCtx = document.getElementById('dataChart').getContext('2d');
+        let myChart = null;
+
+
+
+		// Create header for table based on preloaded captureAreas
+		tr = document.createElement("TR");
+		td = document.createElement("TD");
+		td.innerHTML = "Video time";
+		tr.appendChild(td);
+		captureAreas.forEach((area) => {
+			td = document.createElement("TD");
+			td.innerHTML = area.name;
+			tr.appendChild(td);
+		});
+
+myTableHeader.appendChild(tr);
+
+
+        canvas.addEventListener('mousedown', (e) => {
+			video.pause();
+            stopScanning();
+            const rect = canvas.getBoundingClientRect();
+            const startX = e.clientX - rect.left;
+            const startY = e.clientY - rect.top;
+            currentArea = { startX, startY, width: 0, height: 0 };
+            isDrawing = true;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+            currentArea.width = endX - currentArea.startX;
+            currentArea.height = endY - currentArea.startY;
+            drawCanvas();
+        });
+
+        canvas.addEventListener('mouseup', () => {
+			video.pause();
+            stopScanning();
+            if (isDrawing && currentArea) {
+				if ((currentArea.width > 0) && (currentArea.height > 0)) {
+            // Chiedi all'utente di inserire un nome per l'area
+            	const areaName = prompt("Inserisci un nome per l'area:");
+                captureAreas.push({ ...currentArea, name: areaName });
+                addAreaInfo({ ...currentArea, name: areaName }); // Passa anche il nome alla funzione di aggiunta
+				} else {
+console.log("Empty area, not stored");
+				}
+            }
+            isDrawing = false;
+        });
+
+
+        function initializeVideo() {
+            console.log("Initializing video");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            drawCanvas();
+        }
+
+
+        video.addEventListener('loadedmetadata', initializeVideo);
+        video.addEventListener('loadeddata', initializeVideo);
+
+        // Nuovo evento per gestire il caricamento completo del video
+        video.addEventListener('canplay', () => {
+            console.log("Video can play");
+            initializeVideo();
+        });
+
+        videoInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            const url = URL.createObjectURL(file);
+            video.src = url;
+            video.load();
+        });
+
+        function drawCanvas() {
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+                console.log("Video dimensions not ready, retrying...");
+                requestAnimationFrame(drawCanvas);
+                return;
+            }
+
+            console.log("Drawing canvas");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+
+            captureAreas.forEach(area => {
+                ctx.strokeRect(area.startX, area.startY, area.width, area.height);
+            });
+
+			if (currentArea) {
+            captureAreas.forEach(area => {
+                ctx.strokeRect(currentArea.startX, currentArea.startY, currentArea.width, currentArea.height);
+            });
+
+			}
+        }
+
+		function addAreaInfo(area) {
+		console.log("Aggiungo area info:", area);
+		    const areaDiv = document.createElement('div');
+		    areaDiv.classList.add('area-info');
+		    areaDiv.innerHTML = `
+		        Area: ${area.name} - X: <input type="number" value="${area.startX}" onchange="updateArea(this, 'startX', ${areasCount})" />
+		        Y: <input type="number" value="${area.startY}" onchange="updateArea(this, 'startY', ${areasCount}})" />
+		        Width: <input type="number" value="${area.width}" onchange="updateArea(this, 'width', ${areasCount})" />
+		        Height: <input type="number" value="${area.height}" onchange="updateArea(this, 'height',  ${areasCount})" />
+		    `;
+		    areasContainer.appendChild(areaDiv);
+			areasCount++;
+		}
+
+        function updateArea(input, property, index) {
+            captureAreas[index][property] = parseInt(input.value);
+            drawCanvas();
+        }
+
+
+        function createDataSelectionCheckboxes() {
+            dataSelectionContainer.innerHTML = '';
+            captureAreas.forEach(area => {
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `checkbox-${area.name}`;
+                checkbox.name = area.name;
+                checkbox.checked = true;
+
+                const label = document.createElement('label');
+                label.htmlFor = `checkbox-${area.name}`;
+                label.textContent = area.name;
+
+                dataSelectionContainer.appendChild(checkbox);
+                dataSelectionContainer.appendChild(label);
+            });
+        }
+
+        function plotGraph() {
+            const selectedData = {};
+            captureAreas.forEach(area => {
+                const checkbox = document.getElementById(`checkbox-${area.name}`);
+                if (checkbox && checkbox.checked) {
+                    selectedData[area.name] = [];
+                }
+            });
+
+            textArray.forEach(entry => {
+                entry.forEach(item => {
+                    if (selectedData.hasOwnProperty(item.name)) {
+                        selectedData[item.name].push({
+                            x: item.videoTime,
+                            y: item.value
+                        });
+                    }
+                });
+            });
+
+            const datasets = Object.keys(selectedData).map(name => ({
+                label: name,
+                data: selectedData[name],
+                fill: false,
+                borderColor: getRandomColor(),
+                tension: 0.1
+            }));
+console.log("datasets=",datasets);
+            if (myChart) {
+                myChart.destroy();
+            }
+
+            myChart = new Chart(chartCtx, {
+                type: 'scatter',
+                data: {
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                          //  type: 'time',
+                          /*  time: {
+                                parser: 'HH:mm:ss.SSS',
+                                tooltipFormat: 'HH:mm:ss.SSS',
+                                unit: 'second',
+                                displayFormats: {
+                                    second: 'HH:mm:ss'
+                                }
+                            },*/
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Value'
+                            },
+		                    min: 0,  // Valore minimo dell'asse y
+		                    max: 10000,  // Valore massimo dell'asse y
+		                    ticks: {
+		                        stepSize: 100  // Incremento tra i valori sull'asse y
+		                    }
+                        }
+                    },
+                    plugins: {
+                        zoom: {
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'xy',
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'xy',
+                            },
+                        }
+                    }
+
+                }
+            });
+        }
+
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+
+        video.addEventListener('play', () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            //previewCanvas.width = video.videoWidth / 8; // Set the preview canvas to be smaller
+           // previewCanvas.height = video.videoHeight / 8;
+		    if (isScanning) {
+		        startScanning(); // Start scanning only if it's allowed
+		    }
+        });
+
+		function startScanning() {
+		    if (!isScanning) {
+		        isScanning = true;
+		        scanInterval = setInterval(extractTextFromAreas, INTERVALMS); // Scan every xxx
+		    }
+		}
+
+		function stopScanning() {
+		    clearInterval(scanInterval);
+		    isScanning = false; // Update scanning state to false when stopped
+		            textArrayContent.value = JSON.stringify(textArray, null, 2); // Mostra il contenuto di textArray nella textarea
+		}
+
+
+		function increaseContrast(imageData, contrast) {
+		    const data = imageData.data;
+		    const factor = (259 * (contrast + 255)) / (255 * (259 - contrast)); // Formula per il contrasto
+
+		    for (let i = 0; i < data.length; i += 4) {
+		        // Applica la formula del contrasto a ciascun canale RGB
+		        data[i] = factor * (data[i] - 128) + 128;     // Rosso
+		        data[i + 1] = factor * (data[i + 1] - 128) + 128; // Verde
+		        data[i + 2] = factor * (data[i + 2] - 128) + 128; // Blu
+
+		        // Assicurati che i valori rimangano nei limiti [0, 255]
+		        data[i] = Math.min(255, Math.max(0, data[i]));
+		        data[i + 1] = Math.min(255, Math.max(0, data[i + 1]));
+		        data[i + 2] = Math.min(255, Math.max(0, data[i + 2]));
+		    }
+
+		    return imageData; // Ritorna i dati dell'immagine modificati
+		}
+
+
+        async function extractTextFromAreas() {
+			areasData = [];
+			const currentTime = video.currentTime;
+            captureAreas.forEach((area, areaNum) => {
+				if ((area.width > 0) && (area.height > 0)) {
+	                // Copia l'area di cattura nel canvas di preview
+	                //previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+	                //previewCtx.drawImage(video, area.startX, area.startY, area.width, area.height, 0, 0, previewCanvas.width, previewCanvas.height);
+	                ctx.drawImage(video, area.startX, area.startY, area.width, area.height, 0, 0, area.width, area.height);
+	                imageData = ctx.getImageData(0, 0, area.width, area.height);
+
+	                // Inverti i colori dell'immagine
+	                const data = imageData.data;
+	                for (let i = 0; i < data.length; i += 4) {
+	                    data[i] = 255 - data[i];       // Rosso
+	                    data[i + 1] = 255 - data[i + 1]; // Verde
+	                    data[i + 2] = 255 - data[i + 2]; // Blu
+	                    // Alpha rimane invariato (data[i + 3])
+	                }
+					imageData = increaseContrast(imageData, 50); // Modifica il valore per il contrasto come necessario
+	                ctx.putImageData(imageData, 0, 0);
+	                //previewCtx.putImageData(imageData, 0, 0);
+
+	                rawText = OCRAD(imageData, {numeric: true});
+					curedText = rawText.split("_").join("4"); // bug of unrecognized 4 if 4 is "open"
+					curedText = curedText.split("o").join("0");
+					curedText = curedText.split("O").join("0");
+					curedText = curedText.split("ò").join("0");
+					curedText = curedText.split("i").join("1");
+					curedText = curedText.split("I").join("1");
+					curedText = curedText.split("l").join("1");
+					curedText = curedText.split("/").join("1");
+					curedText = curedText.split('\\').join("1");
+					finalVal = parseInt(curedText);
+//console.log(`Extracted Text from Area (${area.startX}, ${area.startY}): '${extractedText}'`);
+	                areasData.push({ rawText: rawText, name: area.name, value: finalVal, videoTime: currentTime });
+                    // Aggiungi i risultati alla tabella
+ 				} else {
+//console.log("Skip");
+				}
+            });
+            const row = resultsBody.insertRow();
+			row.insertCell(0).textContent = currentTime;
+			count = 1;
+			areasData.forEach((area) => {
+            	row.insertCell(count).textContent = areasData[count-1].value;
+				count++;
+			});
+            textArray.push(areasData);
+        }
+
+        // Funzione per formattare il tempo in HH:MM:SS.mmm
+        function formatTime(timeInSeconds) {
+            const hours = Math.floor(timeInSeconds / 3600);
+            const minutes = Math.floor((timeInSeconds % 3600) / 60);
+            const seconds = Math.floor(timeInSeconds % 60);
+            const milliseconds = Math.floor((timeInSeconds % 1) * 1000);
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+        }
+
+        stopScanButton.addEventListener('click', () => {
+            stopScanning();
+        });
+
+        restartScanButton.addEventListener('click', () => {
+            startScanning();
+        });
+
+        stopVideoButton.addEventListener('click', () => {
+            video.pause();
+        });
+
+        restartVideoButton.addEventListener('click', () => {
+           // video.currentTime = 0;
+            video.play();
+        });
+
+        btnLoadAreas.addEventListener('click', () => {
+           drawCanvas();
+        });
+
+        plotGraphBtn.addEventListener('click', plotGraph);
+
+        // Chiamare questa funzione dopo aver caricato le aree
+        createDataSelectionCheckboxes();
+
+    </script>
+</body>
+</html>
