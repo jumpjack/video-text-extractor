@@ -179,17 +179,20 @@ console.log("startExtraction 04");
                 console.log("tempCanvas=", tempCanvas);
 
                 try {
-                    // Convertiamo il canvas in un Blob
-                    const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
-                    console.log("Blob creato:", blob);
+    // Convertiamo il canvas in un Blob
+    const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
+    console.log("Blob creato:", blob);
 
-                    const { data: { text } } = await scheduler.addJob('recognize', blob);
-                    console.log("TEXT=", text);
-                    extractedData.push({
-                        time: video.currentTime,
-                        areaIndex: i,
-                        text: text.trim()
-                    });
+    // Creiamo un File dal Blob
+    const file = new File([blob], "image.png", { type: "image/png" });
+
+    const { data: { text } } = await scheduler.addJob('recognize', file);
+    console.log("TEXT=", text);
+    extractedData.push({
+        time: video.currentTime,
+        areaIndex: i,
+        text: text.trim()
+    });
                 } catch (error) {
                     console.error('Errore durante l\'estrazione del testo:', error);
                     extractedData.push({
