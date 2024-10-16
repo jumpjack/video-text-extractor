@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estrattore di testo da video</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/2.1.5/tesseract.min.js"></script>
+    <style>
+        #videoContainer {
+            position: relative;
+            display: inline-block;
+        }
+        .captureArea {
+            position: absolute;
+            border: 2px solid red;
+            background-color: rgba(255, 0, 0, 0.2);
+            cursor: move;
+        }
+        .areaInputs {
+            margin-bottom: 10px;
+        }
+        .areaInputs input {
+            width: 50px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <input type="file" id="videoUpload" accept="video/mp4">
+    <div id="videoContainer">
+        <video id="video" controls width="640" height="360"></video>
+        <canvas id="videoCanvas" style="display:none;"></canvas>
+    </div>
+    <button id="addArea">Aggiungi area di cattura</button>
+    <div id="areaCoordinates"></div>
+    <button id="startExtraction">Inizia estrazione</button>
+    <div id="extractionResults"></div>
+
+    <script>
+        let video, canvas, ctx;
+        let captureAreas = [];
+        let extractedData = [];
+        let scheduler;
+
+        document.getElementById('videoUpload').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const videoUrl = URL.createObjectURL(file);
+            video = document.getElementById('video');
+            video.src = videoUrl;
+
+            video.onloadedmetadata = function() {
+                canvas = document.getElementById('videoCanvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx = canvas.getContext('2d');
+            };
+        });
+
+        document.getElementById('addArea').addEventListener('click', addCaptureArea);
+        document.getElementById('startExtraction').addEventListener('click', startExtraction);
+
+        function addCaptureArea() {
+            const area = {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 50
+            };
+            captureAreas.push(area);
+            updateAreaDisplay();
+
+            const areaElement = document.createElement('div');
+            areaElement.className = 'captureArea';
+            document.getElementById('videoContainer').appendChild(areaElement);
+            updateAreaPosition(captureAreas.length - 1);
+
+            areaElement.addEventListener('mousedown', startDragging);
+        }
+
+        function startDragging(e) {
+            e.preventDefault();
+            const areaElement = e.target;
+            const areaIndex = Array.from(areaElement.parentNode.children).indexOf(areaElement) - 1;
+            const startX = e.clientX - captureAreas[areaIndex].x;
+            const startY = e.clientY - captureAreas[areaIndex].y;
+
+            function onMouseMove(e) {
+                const newX = e.clientX - startX;
+                const newY = e.clientY - startY;
+                captureAreas[areaIndex].x = Math.max(0, Math.min(newX, video.offsetWidth - captureAreas[areaIndex].width));
+                captureAreas[areaIndex].y = Math.max(0, Math.min(newY, video.offsetHeight - captureAreas[areaIndex].height));
+                updateAreaPosition(areaIndex);
+                updateAreaDisplay();
+            }
+
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        }
+
+        function updateAreaPosition(index) {
+            const areaElement = document.querySelectorAll('.captureArea')[index];
+            const area = captureAreas[index];
+            areaElement.style.left = area.x + 'px';
+            areaElement.style.top = area.y + 'px';
+            areaElement.style.width = area.width + 'px';
+            areaElement.style.height = area.height + 'px';
+        }
+
+        function updateAreaDisplay() {
+            const areaCoordinates = document.getElementById('areaCoordinates');
+            areaCoordinates.innerHTML = '';
+            captureAreas.forEach((area, index) => {
+                const areaInputs = document.createElement('div');
+                areaInputs.className = 'areaInputs';
+                areaInputs.innerHTML = `
+                    Area ${index + 1}:
+                    X: <input type="number" value="${area.x}" data-index="${index}" data-prop="x">
+                    Y: <input type="number" value="${area.y}" data-index="${index}" data-prop="y">
+                    Width: <input type="number" value="${area.width}" data-index="${index}" data-prop="width">
+                    Height: <input type="number" value="${area.height}" data-index="${index}" data-prop="height">
+                `;
+                areaCoordinates.appendChild(areaInputs);
+            });
+
+            document.querySelectorAll('.areaInputs input').forEach(input => {
+                input.addEventListener('change', function() {
+                    const index = parseInt(this.dataset.index);
+                    const prop = this.dataset.prop;
+                    captureAreas[index][prop] = parseInt(this.value);
+                    updateAreaPosition(index);
+                });
+            });
+        }
+
+         async function startExtraction() {
+console.log("startExtraction 01");
+            if (!video || captureAreas.length === 0) return;
+console.log("startExtraction 02");
+
+            scheduler = Tesseract.createScheduler();
+            const worker = await Tesseract.createWorker('ita');
+
+console.log("startExtraction 03",scheduler, worker);
+
+            await scheduler.addWorker(worker);
+
+            video.currentTime = 0;
+            await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+
+            while (video.currentTime < 10/*video.duration  debug*/) {
+console.log("startExtraction 04");
+                await extractFrameText();
+ console.log("startExtraction 05");
+               video.currentTime += 1;
+                await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+            }
+
+            await scheduler.terminate();
+            displayResults();
+        }
+
+        async function extractFrameText() {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            for (let i = 0; i < captureAreas.length; i++) {
+                const area = captureAreas[i];
+                const imageData = ctx.getImageData(area.x, area.y, area.width, area.height);
+                console.log("imageData=", imageData);
+
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = area.width;
+                tempCanvas.height = area.height;
+                tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+                console.log("tempCanvas=", tempCanvas);
+
+                try {
+                    // Convertiamo il canvas in un Blob
+                    const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/png'));
+                    console.log("Blob creato:", blob);
+
+                    const { data: { text } } = await scheduler.addJob('recognize', blob);
+                    console.log("TEXT=", text);
+                    extractedData.push({
+                        time: video.currentTime,
+                        areaIndex: i,
+                        text: text.trim()
+                    });
+                } catch (error) {
+                    console.error('Errore durante l\'estrazione del testo:', error);
+                    extractedData.push({
+                        time: video.currentTime,
+                        areaIndex: i,
+                        text: 'Errore nell\'estrazione del testo'
+                    });
+                }
+            }
+        }
+
+        function displayResults() {
+            const resultsDiv = document.getElementById('extractionResults');
+            resultsDiv.innerHTML = extractedData.map(item =>
+                `Tempo: ${item.time.toFixed(2)}s, Area: ${item.areaIndex + 1}, Testo: ${item.text}`
+            ).join('<br>');
+        }
+    </script>
+</body>
+</html>
