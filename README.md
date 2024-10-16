@@ -11,5 +11,6 @@ Trying to get a working result....
 
 - [Test 01](https://jumpjack.github.io/video-text-extractor/index.html) (no)
 - [Test 02](https://jumpjack.github.io/video-text-extractor/index2.html) (no)
-- [Test 03](https://jumpjack.github.io/video-text-extractor/index3.html)  **OK**
+- [Test 03](https://jumpjack.github.io/video-text-extractor/index3.html) (no)
+- [Test 04](https://jumpjack.github.io/video-text-extractor/index4.html)   **OK**
 
